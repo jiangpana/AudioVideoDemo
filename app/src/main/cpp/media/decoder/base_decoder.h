@@ -14,6 +14,8 @@
 #include "i_decoder.h"
 #include "decode_state.h"
 
+typedef void (*Progress_CallBack)(float data,JNIEnv *env );
+
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
@@ -21,9 +23,11 @@ extern "C" {
 #include <libavutil/time.h>
 };
 
-class BaseDecoder: public IDecoder {
+class BaseDecoder : public IDecoder {
 
 private:
+
+    Progress_CallBack progress_CallBack =NULL;
 
     const char *TAG = "BaseDecoder";
 
@@ -43,10 +47,10 @@ private:
     // 最终解码数据
     AVFrame *m_frame = NULL;
 
-    // 当前播放时间
+    // 当前播放时间,单位毫秒
     int64_t m_cur_t_s = 0;
 
-    // 总时长
+    // 总时长,单位毫秒
     long m_duration = 0;
 
     // 开始播放的时间
@@ -55,7 +59,7 @@ private:
     // 解码状态
     DecodeState m_state = STOP;
 
-    // 数据流索引
+    // 数据流索引,视频或者音频
     int m_stream_index = -1;
 
     // -------------------定义线程相关-----------------------------
@@ -87,7 +91,7 @@ private:
      * 初始化FFMpeg相关的参数
      * @param env jvm环境
      */
-    void InitFFMpegDecoder(JNIEnv * env);
+    void InitFFMpegDecoder(JNIEnv *env);
 
     /**
      * 分配解码过程中需要的缓存
@@ -102,12 +106,12 @@ private:
     /**
      * 循环解码
      */
-    void LoopDecode();
+    void LoopDecode(JNIEnv *env);
 
     /**
      * 获取当前帧时间戳
      */
-    void ObtainTimeStamp();
+    void ObtainTimeStamp(JNIEnv *env);
 
     /**
      * 解码完成
@@ -128,6 +132,7 @@ private:
 
 public:
     BaseDecoder(JNIEnv *env, jstring path, bool for_synthesizer);
+
     virtual ~BaseDecoder();
 
     /**
@@ -151,11 +156,21 @@ public:
     }
 
     void GoOn() override;
+
     void Pause() override;
+
     void Stop() override;
+
     bool IsRunning() override;
+
     long GetDuration() override;
+
     long GetCurPos() override;
+
+    void SeekTo(float pos) override;
+
+
+    void SetProgressCallBack(Progress_CallBack callBack);
 
     void SetStateReceiver(IDecodeStateCb *cb) override {
         m_state_cb = cb;
@@ -163,12 +178,18 @@ public:
 
     char *GetStateStr() {
         switch (m_state) {
-            case STOP: return (char *)"STOP";
-            case START: return (char *)"START";
-            case DECODING: return (char *)"DECODING";
-            case PAUSE: return (char *)"PAUSE";
-            case FINISH: return (char *)"FINISH";
-            default: return (char *)"UNKNOW";
+            case STOP:
+                return (char *) "STOP";
+            case START:
+                return (char *) "START";
+            case DECODING:
+                return (char *) "DECODING";
+            case PAUSE:
+                return (char *) "PAUSE";
+            case FINISH:
+                return (char *) "FINISH";
+            default:
+                return (char *) "UNKNOW";
         }
     }
 
@@ -183,7 +204,7 @@ protected:
         return m_for_synthesizer;
     }
 
-    const char * path() {
+    const char *path() {
         return m_path;
     }
 
@@ -214,7 +235,7 @@ protected:
      * 解码一帧数据
      * @return
      */
-    AVFrame* DecodeOneFrame();
+    AVFrame *DecodeOneFrame(JNIEnv *env);
 
     /**
      * 音视频索引

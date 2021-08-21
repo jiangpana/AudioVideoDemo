@@ -14,6 +14,7 @@ extern "C"
 #include <libavcodec/jni.h>
 
 
+
 JNIEXPORT jstring JNICALL
 Java_com_jansir_audiovideodemo_MainActivity_ffmpegInfo(JNIEnv *env, jobject thiz) {
     char info[40000] = {0};
@@ -42,11 +43,32 @@ Java_com_jansir_audiovideodemo_MainActivity_ffmpegInfo(JNIEnv *env, jobject thiz
     return env->NewStringUTF(info);
 }
 
+static  JNIEnv *my_env =NULL ;
+static  jobject mainActivity =NULL;
+
+
+void call_back(float pro,JNIEnv *env) {
+    LOGE("TAG", "进度 pro%f", pro);
+    jclass cls = env-> GetObjectClass(mainActivity);
+    jmethodID _mid = env->GetMethodID( cls, "setProgress", "(F)V");
+//    jobject obj=env->NewGlobalRef(mainActivity);
+    env->CallVoidMethod(mainActivity, _mid,pro);
+//    env->DeleteGlobalRef();
+}
+
 
 JNIEXPORT jint JNICALL
 Java_com_jansir_audiovideodemo_MainActivity_createPlayer(JNIEnv *env, jobject thiz, jstring path,
                                                          jobject surface) {
+
+/*    jclass cls = env-> GetObjectClass(thiz);
+    jmethodID _mid = env->GetMethodID( cls, "setProgress", "()V");
+    env->CallVoidMethod(thiz, _mid);*/
+
+    my_env =env;
+    mainActivity=env->NewGlobalRef(thiz);
     Player *player = new Player(env, path, surface);
+    player->SetProgressCallBack(call_back);
     return (jint) player;
 
 }
@@ -59,12 +81,32 @@ Java_com_jansir_audiovideodemo_MainActivity_play(JNIEnv *env, jobject thiz, jint
     p->play();
 }
 
+JNIEXPORT void JNICALL
+Java_com_jansir_audiovideodemo_MainActivity_rePlay(JNIEnv *env, jobject thiz, jint player) {
+
+    Player *p = (Player *) player;
+    p->rePlay();
+}
+
+JNIEXPORT void JNICALL
+Java_com_jansir_audiovideodemo_MainActivity_seekTo(JNIEnv *env, jobject thiz, jint player,
+                                                   jfloat pos) {
+
+    Player *p = (Player *) player;
+    p->SeekTo((float) pos);
+}
 
 JNIEXPORT void JNICALL
 Java_com_jansir_audiovideodemo_MainActivity_pause(JNIEnv *env, jobject thiz, jint player) {
     Player *p = (Player *) player;
     p->pause();
 
+}
+
+JNIEXPORT void JNICALL
+Java_com_jansir_audiovideodemo_MainActivity_goOn(JNIEnv *env, jobject thiz, jint player) {
+    Player *p = (Player *) player;
+    p->goOn();
 }
 
 }

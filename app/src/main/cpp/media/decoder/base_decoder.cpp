@@ -6,9 +6,11 @@
 
 #include "base_decoder.h"
 #include "../../utils/timer.c"
+#include "../../utils/logger.h"
+
 
 BaseDecoder::BaseDecoder(JNIEnv *env, jstring path, bool for_synthesizer)
-: m_for_synthesizer(for_synthesizer) {
+        : m_for_synthesizer(for_synthesizer) {
     Init(env, path);
     CreateDecodeThread();
 }
@@ -31,11 +33,14 @@ void BaseDecoder::CreateDecodeThread() {
     // 使用智能指针，线程结束时，自动删除本类指针
     std::shared_ptr<BaseDecoder> that(this);
     std::thread t(Decode, that);
+    //detach作用是将子线程和主线程的关联分离，也就是说detach()后子线程在后台独立继续运行，
+    // 主线程无法再取得子线程的控制权，即使主线程结束，子线程未执行也不会结束。
+    // 当主线程结束时，由运行时库负责清理与子线程相关的资源。
     t.detach();
 }
 
 void BaseDecoder::Decode(std::shared_ptr<BaseDecoder> that) {
-    JNIEnv * env;
+    JNIEnv *env;
 
     //将线程附加到虚拟机，并获取env
     if (that->m_jvm_for_thread->AttachCurrentThread(&env, NULL) != JNI_OK) {
@@ -49,7 +54,7 @@ void BaseDecoder::Decode(std::shared_ptr<BaseDecoder> that) {
     that->AllocFrameBuffer();
     av_usleep(1000);
     that->Prepare(env);
-    that->LoopDecode();
+    that->LoopDecode(env);
     that->DoneDecode(env);
 
     that->CallbackState(STOP);
@@ -59,10 +64,10 @@ void BaseDecoder::Decode(std::shared_ptr<BaseDecoder> that) {
 
 }
 
-void BaseDecoder::InitFFMpegDecoder(JNIEnv * env) {
+void BaseDecoder::InitFFMpegDecoder(JNIEnv *env) {
     //1，初始化上下文
     m_format_ctx = avformat_alloc_context();
-
+    LOG_ERROR(TAG, LogSpec(), "m_path =  %s", m_path);
     //2，打开文件
     if (avformat_open_input(&m_format_ctx, m_path, NULL, NULL) != 0) {
         LOG_ERROR(TAG, LogSpec(), "Fail to open file [%s]", m_path);
@@ -115,7 +120,8 @@ void BaseDecoder::InitFFMpegDecoder(JNIEnv * env) {
         return;
     }
 
-    m_duration = (long)((float)m_format_ctx->duration/AV_TIME_BASE * 1000);
+    m_duration = (long) ((float) m_format_ctx->duration / AV_TIME_BASE * 1000);
+    LOGE(TAG, "总时间 m_duration = %s", std::to_string(m_duration).c_str());
 
     LOG_INFO(TAG, LogSpec(), "Decoder init success")
 }
@@ -128,7 +134,7 @@ void BaseDecoder::AllocFrameBuffer() {
     m_frame = av_frame_alloc();
 }
 
-void BaseDecoder::LoopDecode() {
+void BaseDecoder::LoopDecode(JNIEnv *env) {
     if (STOP == m_state) { // 如果已被外部改变状态，维持外部配置
         m_state = START;
     }
@@ -136,7 +142,7 @@ void BaseDecoder::LoopDecode() {
     CallbackState(START);
 
     LOG_INFO(TAG, LogSpec(), "Start loop decode")
-    while(1) {
+    while (1) {
         if (m_state != DECODING &&
             m_state != START &&
             m_state != STOP) {
@@ -155,7 +161,7 @@ void BaseDecoder::LoopDecode() {
             m_started_t = GetCurMsTime();
         }
 
-        if (DecodeOneFrame() != NULL) {
+        if (DecodeOneFrame(env) != NULL) {
             SyncRender();
             Render(m_frame);
 
@@ -163,7 +169,7 @@ void BaseDecoder::LoopDecode() {
                 m_state = PAUSE;
             }
         } else {
-            LOG_INFO(TAG, LogSpec(), "m_state = %d" ,m_state)
+            LOG_INFO(TAG, LogSpec(), "m_state = %d", m_state)
             if (ForSynthesizer()) {
                 m_state = STOP;
             } else {
@@ -174,7 +180,15 @@ void BaseDecoder::LoopDecode() {
     }
 }
 
-AVFrame* BaseDecoder::DecodeOneFrame() {
+/**
+ * 解码一帧
+ *  av_read_frame 方法 : 从 m_format_ctx 中读取一帧解封好的待解码数据，存放在 m_packet 中
+ *  avcodec_send_packet 方法 : 将 m_packet 发送到解码器中解码，解码好的数据存放在 m_codec_ctx 中
+ *  avcodec_receive_frame 方法 : 接收一帧解码好的数据，存放在 m_frame
+ *  av_packet_unref 方法 : 释放内存，否则会导致内存泄漏。
+ * @return
+ */
+AVFrame *BaseDecoder::DecodeOneFrame(JNIEnv *env) {
     int ret = av_read_frame(m_format_ctx, m_packet);
     while (ret == 0) {
         if (m_packet->stream_index == m_stream_index) {
@@ -199,11 +213,12 @@ AVFrame* BaseDecoder::DecodeOneFrame() {
             //TODO 这里需要考虑一个packet有可能包含多个frame的情况
             int result = avcodec_receive_frame(m_codec_ctx, m_frame);
             if (result == 0) {
-                ObtainTimeStamp();
+                ObtainTimeStamp(env);
                 av_packet_unref(m_packet);
                 return m_frame;
             } else {
-                LOG_INFO(TAG, LogSpec(), "Receive frame error result: %s", av_err2str(AVERROR(result)))
+                LOG_INFO(TAG, LogSpec(), "Receive frame error result: %s",
+                         av_err2str(AVERROR(result)))
             }
         }
         // 释放packet
@@ -241,15 +256,26 @@ void BaseDecoder::CallbackState(DecodeState status) {
     }
 }
 
-void BaseDecoder::ObtainTimeStamp() {
-    if(m_frame->pkt_dts != AV_NOPTS_VALUE) {
+void BaseDecoder::ObtainTimeStamp(JNIEnv *env) {
+    if (m_frame->pkt_dts != AV_NOPTS_VALUE) {
         m_cur_t_s = m_packet->dts;
+        LOGE(TAG, "当前时间m_packet->dts %s", std::to_string(m_packet->dts).c_str());
     } else if (m_frame->pts != AV_NOPTS_VALUE) {
+        LOGE(TAG, "当前时间 m_frame->pts %s", std::to_string(m_frame->pts).c_str());
         m_cur_t_s = m_frame->pts;
     } else {
         m_cur_t_s = 0;
     }
-    m_cur_t_s = (int64_t)((m_cur_t_s * av_q2d(m_format_ctx->streams[m_stream_index]->time_base)) * 1000);
+    m_cur_t_s = (int64_t) ((m_cur_t_s * av_q2d(m_format_ctx->streams[m_stream_index]->time_base)) *
+                           1000);
+    if(progress_CallBack){
+        //m_duration =30232
+        progress_CallBack((float)m_cur_t_s/(float)m_duration,env);
+    }
+
+    LOGE(TAG, "当前时间 m_cur_t_s = %s", std::to_string(m_cur_t_s).c_str());
+
+
 }
 
 void BaseDecoder::SyncRender() {
@@ -260,7 +286,7 @@ void BaseDecoder::SyncRender() {
     int64_t ct = GetCurMsTime();
     int64_t passTime = ct - m_started_t;
     if (m_cur_t_s > passTime) {
-        av_usleep((unsigned int)((m_cur_t_s - passTime) * 1000));
+        av_usleep((unsigned int) ((m_cur_t_s - passTime) * 1000));
     }
 }
 
@@ -340,5 +366,19 @@ long BaseDecoder::GetDuration() {
 }
 
 long BaseDecoder::GetCurPos() {
-    return (long)m_cur_t_s;
+    return (long) m_cur_t_s;
+}
+
+void BaseDecoder::SeekTo(float progress) {
+    Pause();
+    LOGE(TAG, "SeekTo progress =%f", progress);
+    m_cur_t_s = (int64_t) progress * m_duration;
+    //AVSEEK_FLAG_BACKWARD 的作用是seek到请求的timestamp之前最近的关键帧
+    int64_t timestamp = (int64_t) (progress * m_duration / 1000)/av_q2d(time_base());
+    av_seek_frame(m_format_ctx, m_stream_index, timestamp, AVSEEK_FLAG_BACKWARD);
+    GoOn();
+}
+
+void BaseDecoder::SetProgressCallBack(Progress_CallBack callBack) {
+    progress_CallBack = callBack;
 }

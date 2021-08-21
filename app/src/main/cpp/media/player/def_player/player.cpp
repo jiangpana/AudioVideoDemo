@@ -39,3 +39,31 @@ void Player::pause() {
         m_a_decoder->Pause();
     }
 }
+
+void Player::rePlay() {
+    if (m_v_decoder != NULL) {
+        m_v_decoder->SeekTo(0);
+        m_a_decoder->SeekTo(0);
+    }
+}
+
+void Player::goOn() {
+    if (m_v_decoder != NULL) {
+        m_v_decoder->GoOn();
+        m_a_decoder->GoOn();
+    }
+}
+
+void Player::SeekTo(float pro) {
+    if (m_v_decoder != NULL) {
+        m_v_decoder->SeekTo(pro);
+        m_a_decoder->SeekTo(pro);
+    }
+}
+
+void Player::SetProgressCallBack(Progress_CallBack callBack) {
+    if(m_v_decoder){
+        m_v_decoder->SetProgressCallBack(callBack);
+    }
+
+}

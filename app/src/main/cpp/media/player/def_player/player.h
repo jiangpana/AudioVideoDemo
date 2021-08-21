@@ -26,6 +26,10 @@ public:
 
     void play();
     void pause();
+    void rePlay();
+    void SeekTo(float pro);
+    void goOn();
+    void SetProgressCallBack(Progress_CallBack callBack);
 };
 
 

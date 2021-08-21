@@ -17,10 +17,10 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags("")
-                abiFilters  "armeabi-v7a"
+                abiFilters "armeabi-v7a"
             }
             ndk {
-                abiFilters  "armeabi-v7a" //, "armeabi-v7a"
+                abiFilters "armeabi-v7a" //, "armeabi-v7a"
             }
         }
     }
@@ -29,6 +29,9 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            jniDebuggable true
         }
     }
     compileOptions {
@@ -77,4 +80,6 @@ dependencies {
     androidTestImplementation 'androidx.test.ext:junit:1.1.3'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.4.0'
     implementation 'com.github.getActivity:XXPermissions:11.6'
+    implementation 'com.danikula:videocache:2.7.1'
+
 }
